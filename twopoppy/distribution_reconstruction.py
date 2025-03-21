@@ -2,7 +2,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import warnings
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumulative_trapezoid as cumtrapz
 from scipy.interpolate import interp1d
 from .const import k_b, mu, m_p, Grav, pi, sig_h2, M_sun, AU, year
 
