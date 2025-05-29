@@ -280,21 +280,25 @@ def run(x, a_0, time, sig_g, sig_d, v_gas, T, alpha, m_star, V_FRAG, RHO_S,
         #
         # do the update
         #
+        #u_dust = impl_donorcell_adv_diff_delta(
+        #    n_r, x, D, v, g, h, K, L, flim, u_in, dt, 1, 1, 0, 0, 0, 0, 1, A0, B0, C0, D0)
+        
+        #Have changed this to allow outflow at the inner edge
         u_dust = impl_donorcell_adv_diff_delta(
-            n_r, x, D, v, g, h, K, L, flim, u_in, dt, 1, 1, 0, 0, 0, 0, 1, A0, B0, C0, D0)
+            n_r, x, D, v, g, h, K, L, flim, u_in, dt, 0, 1, 1, 0, 0, u_in[0], 1, A0, B0, C0, D0)
 
-        mask = abs(u_dust[2:-1] / u_in[2:-1] - 1) > CFL
+        mask = abs(u_dust[1:-1] / u_in[1:-1] - 1) > CFL
         #
         # try variable time step
         #
-        while any(u_dust[2:-1][mask] / x[2:-1][mask] >= 1e-30):
+        while any(u_dust[1:-1][mask] / x[1:-1][mask] >= 1e-30):
             dt = dt / 10.
             if dt < year and snap_count > 0:
                 print('ERROR: time step got too short')
                 sys.exit(1)
             u_dust = impl_donorcell_adv_diff_delta(
-                n_r, x, D, v, g, h, K, L, flim, u_in, dt, 1, 1, 0, 0, 0, 0, 1, A0, B0, C0, D0)
-            mask = abs(u_dust[2:-1] / u_in[2:-1] - 1) > CFL
+                n_r, x, D, v, g, h, K, L, flim, u_in, dt, 0, 1, 1, 0, 0, u_in[0], 1, A0, B0, C0, D0)
+            mask = abs(u_dust[1:-1] / u_in[1:-1] - 1) > CFL
         #
         # update
         #

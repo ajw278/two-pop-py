@@ -196,6 +196,7 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
     floor = 1e-100
     if fix_pd is not None:
         print('WARNING: fixing the inward diffusion slope')
+        
     #
     # calculate derived quantities
     #
@@ -204,14 +205,18 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
     om = np.sqrt(Grav * M_star / r**3)
     vk = r * om
     gamma = dlydlx(r, sig_g * np.sqrt(T) * om)
+    
     p = -dlydlx(r, sig_g)
+    #p  = np.minimum(p, -2.)
     q = -dlydlx(r, T)
+    #q  = np.m(q, 0.0)
     #
     # fragmentation size
     #
     b = 3. * alpha * cs**2 / v_f**2
-    a_fr = sig_g / (pi * rho_s) * (b - np.sqrt(b**2 - 4.))
-    a_fr[np.isnan(a_fr)] = np.inf
+    sqrt_input = np.maximum(b**2 - 4., 0)
+    a_fr = sig_g / (pi * rho_s) * (b - np.sqrt(sqrt_input))
+    a_fr[np.isnan(a_fr)|(sqrt_input==0)] = np.inf
     #
     # drift size
     #
@@ -220,7 +225,8 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
     #
     # time dependent growth
     #
-    t_grow = sig_g / (estick * om * sig_d)
+    sig_d2g = np.clip(sig_d / sig_g, 1e-4, 1e6)
+    t_grow = 1. / (estick * om * sig_d2g)
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', r'overflow encountered in exp')
         a_grow = a_0 * np.exp(t / t_grow)
@@ -228,6 +234,7 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
     # the minimum of all of those
     #
     a_max = np.minimum(np.minimum(a_fr, a_dr), a_grow)
+    p
     if a_max.max() > a[-1]:
         raise ValueError(
             'Maximum grain size larger than size grid. Increase upper end of size grid.')
@@ -315,9 +322,11 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
     ai = 0.5 * (a[1:] + a[:-1])
     ri = np.hstack((r[0] - (ri[0] - r[0]), ri, r[-1] + (r[-1] - ri[-1])))
     ai = np.hstack((a[0] - (ai[0] - a[0]), ai, a[-1] + (a[-1] - ai[-1])))
-    f = interp1d(np.log10(np.hstack((0.5 * ri[0], r))), np.log10(np.hstack(
-        (a_max[0], a_max))), bounds_error=False, fill_value=np.log10(a_max[-1]))
+    #a_max[a_max<a[0]] = a[0]
+    a_interp = np.log10(np.hstack( (a_max[0], a_max)))
+    f = interp1d(np.log10(np.hstack((0.5 * ri[0], r))), a_interp, bounds_error=False, fill_value=np.log10(a_max[-1]))
     res = trace_line_though_grid(np.log10(ri), np.log10(ai), f)
+    
     #
     # loop through every cell
     #
@@ -372,8 +381,12 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
         v = v0[ir] * (r / ra)**d[ir]
         pd_est = 1. / (2 * alpha) * (v / cs * vk / cs - 2 * p * alpha + vk / cs * np.sqrt(
             (v / cs)**2 + 4 * (1 + d - p) * v / vk * alpha + 4 * alpha * sig_d / sig_g))
+            
+       	
         if fix_pd is not None:
             pd_est = fix_pd * np.ones(n_r)
+        else:
+            pd_est[pd_est<2.0]  = np.nan
         #
         # now decide where to apply the solution: inward or outward
         #
@@ -400,6 +413,8 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
             # at least fill the initial cell
             #
             sig_3[ia, ir] = np.maximum(sig_d[ir], sig_3[ia, ir])
+       	
+       	
         if v0[ir] <= 0:
             #
             # outward diffusion
@@ -408,6 +423,11 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
             mask[ir + 1:next_frag + 1] = True
             A = a[ia] * rho_s * pi * gamma[ir] / \
                 (2 * alpha[ir] * _sigg * p[ir])
+            
+            expo = A * ((r[mask] / ra)**p[mask] - 1.)
+            expo = np.clip(expo, -1000, 500)  # limit growth
+            sol2 = np.maximum(sig_3[ia, mask], _sigd * np.exp(expo))
+
             sol2 = np.maximum(sig_3[ia, mask], _sigd * np.exp(A * ((r[mask] / ra)**p[mask] - 1.)))
             #
             # make sure this diffusion is not increasing
@@ -452,8 +472,6 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
         # now get the slope and continue it downward
         #
         imax = sig_3[:, ir].argmax()
-        pwl = np.log(sig_3[imax, ir] / sig_3[i_full, ir]) / \
-            np.log(a[imax] / a[i_full])
         if imax == i_full:
             imax = np.where(sig_3[:, ir] > floor)[0][-1]
             if imax == i_full:
@@ -463,7 +481,10 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
                 pwl = np.log(sig_3[imax, ir] / sig_3[i_full, ir]
                              ) / np.log(a[imax] / a[i_full])
                 pwl = max(3, pwl)
-
+        else:
+              pwl = np.log(sig_3[imax, ir] / sig_3[i_full, ir]) / \
+                 np.log(a[imax] / a[i_full])
+        
         sig_3[:i_full, ir] = sig_3[i_full, ir] * (a[:i_full] / a[i_full])**pwl
     #
     # Now the problem is how to stitch the 3 distributions together,
@@ -534,6 +555,7 @@ def reconstruct_size_distribution(r, a, t, sig_g, sig_d, alpha, rho_s, T, M_star
                 2 * pi * r[ir0:ir1 + 1] * (kernel * sig_dr[ia0:ia1 + 1, ir0:ir1 + 1]).sum(0), x=r[ir0:ir1 + 1])
     if len(frag_idx) == 0:
         frag_idx = [0]
+    
     if return_a:
         return sig_s, a_max, r[frag_idx[-1]], sig_1, sig_2, sig_3, a_dr, a_fr, a_grow
     else:
